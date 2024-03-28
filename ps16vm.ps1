@@ -115,7 +115,8 @@ function New-Device {
         $bytes = $this.mem.mem8[$address], $this.mem.mem8[$address + 1]
         if ([BitConverter]::IsLittleEndian) {
             return [BitConverter]::ToUInt16($bytes, 0)
-        } else {
+        }
+        else {
             return [BitConverter]::ToUInt16($bytes[1], $bytes[0])
         }
     }
@@ -127,7 +128,8 @@ function New-Device {
         $bytes = [BitConverter]::GetBytes($value)
         if ([BitConverter]::IsLittleEndian) {
             $bytes = $bytes[0], $bytes[1]
-        } else {
+        }
+        else {
             $bytes = $bytes[1], $bytes[0]
         }
         $this.mem.mem8[$address] = $bytes[0]
@@ -318,7 +320,7 @@ function Push-State {
     Push-Stack -cpu $cpu -value $cpu.registers[$R15]
     Push-Stack -cpu $cpu -value $cpu.registers[$IP]
     # push stackframe size + 2 (2 bytes)
-    Push-Stack -cpu $cpu -value ($cpu.stackframeSize + 2)
+    Push-Stack -cpu $cpu -value ($cpu.stackframeSize)
     # set frame pointer to stack pointer
     $cpu.registers[$FP] = $cpu.registers[$SP]
     # set stackframe size to 0
@@ -357,8 +359,6 @@ function Pop-State {
 }
 
 function Dump-Mem {
-    # MEM 0x0000000000000000-0x00000000FFFFFFFF:
-    # 00000000: 0xFF 0xFF 0xFF ....
     param (
         [object]$mem,
         [uint16]$start,
@@ -382,7 +382,7 @@ function Dump-Reg {
         [object]$cpu
     )
     for ($i = 0; $i -lt 20; $i++) {
-        Write-Host ('{0}: 0x{1:X4}' -f @('IP', 'SP', 'FP', 'ACC', 'R0', 'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R12', 'R13', 'R14', 'R15')[$i], $cpu.registers[$i])
+        Write-Host ('{0}: 0x{1:X4} ({1})' -f @('IP', 'SP', 'FP', 'ACC', 'R0', 'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R12', 'R13', 'R14', 'R15')[$i], $cpu.registers[$i])
     }
 }
 
@@ -609,9 +609,24 @@ function Main {
 
     # Main routine
     Write-Mem -m $mem -start 0 -data @(
-        $OP_MOV_IMM, $R0, 0x61, 0x00, # R0 = 0x0061 (97)
+        # Assuming R0 is 0 at start
+        $OP_INC, $R0, # R0++
+        $OP_CMP_IMM, $R0, 0xFF, 0x00, # CMP R0, 0x00FF
+        $OP_JE, 0x30, 0x00, # JE 0x0030 (HLT)
         $OP_CALL, 0x00, 0x01, # CALL 0x0100 (is_prime)
-        $OP_MOV, $R1, $ACC, # R1 = ACC
+        $OP_CMP_IMM, $ACC, 0x01, 0x00, # CMP ACC, 0x0001 (is_prime returns 1 if prime, 0 if not prime)
+        $OP_JE, 0x20, 0x00, # JE 0x0020 (psh prime)
+        $OP_JMP, 0x00, 0x00 # JMP 0x0000
+    )
+
+    # psh prime routine
+    Write-Mem -m $mem -start 0x0020 -data @(
+        $OP_PUSH, $R0, # PUSH R0
+        $OP_JMP, 0x00, 0x00 # JMP 0x0000
+    )
+
+    # HLT routine
+    Write-Mem -m $mem -start 0x0030 -data @(
         $OP_HLT
     )
 
@@ -657,7 +672,7 @@ function Main {
     while (($op = Run-Step -cpu $cpu) -ne $OP_HLT) {
         # Write-Host ('Prev. OP: {0:X2} : {1}' -f $op ,(Map-Op-Code-To-String -op $op))
         # Dump-Reg -cpu $cpu
-        # Write-Host "Stack:"
+        # Write-Host "Stack: sfs: $($cpu.stackframeSize)"
         # Dump-Mem -mem $mem -start ($cpu.registers[$SP]) -end $STACK_BASE
         # Write-Host "Memory at IP:"
         # Dump-Mem -mem $mem -start $cpu.registers[$IP] -end ($cpu.registers[$IP] + 0x30)
@@ -666,8 +681,8 @@ function Main {
 
     # Dump registers
     Dump-Reg -cpu $cpu
-    # Dump memory
-    Dump-Mem -mem $mem -start $cpu.registers[$IP] -end ($cpu.registers[$IP] + 0x30)
+    Write-Host "Stack: sfs: $($cpu.stackframeSize)"
+    Dump-Mem -mem $mem -start ($cpu.registers[$SP]) -end $STACK_BASE
 }
 
 Main
